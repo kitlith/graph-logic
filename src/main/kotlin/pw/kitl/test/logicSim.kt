@@ -1,10 +1,29 @@
 package pw.kitl.test
 
+import com.google.common.graph.Network
 import com.google.common.graph.MutableNetwork
+import com.google.common.graph.NetworkBuilder
+
+fun <N,E> MutableNetwork<N,E>.merge(other: Network<N,E>) {
+    for (edge in other.edges()) {
+        var endpoints = other.incidentNodes(edge)
+        this.addEdge(endpoints.source(), endpoints.target(), edge);
+    }
+}
+
+fun create_logicgraph(): MutableNetwork<LogicNode, LogicEdge>
+    = NetworkBuilder.directed()
+        .allowsParallelEdges(true)
+        .allowsSelfLoops(true)
+        .build()
 
 fun collapse_wires(graph: MutableNetwork<LogicNode, LogicEdge>) {
     for (node in graph.nodes().filterIsInstance<CollapsableNode>()) {
         node.collapse(graph)
+    }
+
+    for (node in graph.nodes()) {
+        node.getOutputs(graph.outEdges(node))
     }
 }
 
@@ -17,7 +36,8 @@ fun tick_graph(graph: MutableNetwork<LogicNode, LogicEdge>, nodes_to_tick: Itera
                 inputs.put(edge.toUid, Pair(edge.toChannel, edge.value))
             }
         }
-        node.tickLogic(inputs.values, graph.outEdges(node))
+        node.updateState(inputs.values)
+        node.getOutputs(graph.outEdges(node))
         edges_to_tick.addAll(graph.outEdges(node).filter({edge -> edge.hasUpdated()}))
     }
 

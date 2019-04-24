@@ -8,8 +8,8 @@ repositories {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.1.51")
-    implementation("org.jetbrains.kotlin:kotlin-reflect:1.1.51")
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.3.0")
+    implementation("org.jetbrains.kotlin:kotlin-reflect:1.3.0")
     implementation("org.jgrapht:jgrapht-core:1.3.0")
     implementation("org.jgrapht:jgrapht-guava:1.3.0")
     implementation("org.jgrapht:jgrapht-io:1.3.0")

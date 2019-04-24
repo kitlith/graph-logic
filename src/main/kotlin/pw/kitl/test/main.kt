@@ -34,7 +34,7 @@ fun main(args : Array<String>) {
     graph.addEdge(bw2, xor3, LogicEdge(fromChannel=LogicChannel(ch=Channel.Bundled(0))));
     graph.addEdge(bw2, xor3, LogicEdge(fromChannel=LogicChannel(ch=Channel.Bundled(1))));
     graph.addEdge(xor3, w1, LogicEdge());
-    graph.addEdge(w1, xor3, LogicEdge());
+    //graph.addEdge(w1, xor3, LogicEdge());
     graph.addEdge(w1, w2, LogicEdge());
     graph.addEdge(w2, w1, LogicEdge());
     graph.addEdge(w2, w3, LogicEdge());
@@ -53,13 +53,30 @@ fun main(args : Array<String>) {
 
     export_graph(graph, "before.dot")
 
-    collapse_wires(graph)
+    var collapsed_graph = create_logicgraph();
+    collapsed_graph.merge(graph);
+    collapse_wires(collapsed_graph)
     var iterations = 0
     var nodes_to_tick: Set<LogicNode> = setOf(t,f);
     while (nodes_to_tick.size != 0) {
-        nodes_to_tick = tick_graph(graph, nodes_to_tick)
+        nodes_to_tick = tick_graph(collapsed_graph, nodes_to_tick)
         iterations += 1
     }
+    export_graph(collapsed_graph, "middle.dot")
+    println("Took $iterations iterations")
+
+    iterations = 0;
+    graph.removeNode(xor1);
+
+    collapsed_graph = create_logicgraph();
+    collapsed_graph.merge(graph);
+    collapse_wires(collapsed_graph);
+    nodes_to_tick = collapsed_graph.nodes(); //graph.successors(bw1); // need to do something more complicated to, say, find differences between the collapsed graphs.
+    while (nodes_to_tick.size != 0) {
+        nodes_to_tick = tick_graph(collapsed_graph, nodes_to_tick)
+        iterations += 1
+    }
+
     export_graph(graph, "after.dot")
     println("Took $iterations iterations")
 }

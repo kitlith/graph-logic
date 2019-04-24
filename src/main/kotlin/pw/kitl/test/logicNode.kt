@@ -5,65 +5,87 @@ import kotlin.reflect.KClass
 import kotlin.reflect.full.createInstance
 
 interface LogicNode {
-    fun tickLogic(inputs: Iterable<Pair<LogicChannel, Boolean>>, outputs: Iterable<LogicEdge>)
+    fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+    fun getOutputs(outputs: Iterable<LogicEdge>)
 }
 
 interface CombinatorialNode: LogicNode {
+    var output: Boolean
     fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>): Boolean
-    override fun tickLogic(inputs: Iterable<Pair<LogicChannel, Boolean>>, outputs: Iterable<LogicEdge>) {
-        var value = getValue(inputs)
+    override fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>) {
+        output = getValue(inputs)
+    }
+    override fun getOutputs(outputs: Iterable<LogicEdge>) {
+        for (each in outputs) {
+            each.queuedValue = output
+        }
+    }
+}
+
+open class OR: CombinatorialNode {
+    override var output = false
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = inputs.any({item -> item.second})
+}
+class NOR: OR() {
+    override var output = true
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = !super.getValue(inputs)
+}
+open class XOR: CombinatorialNode {
+    override var output = false
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = inputs.fold(false, {a, b -> a xor b.second})
+}
+class XNOR: XOR() {
+    override var output = true
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = !super.getValue(inputs)
+}
+open class AND: CombinatorialNode {
+    override var output = false
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = inputs.all({item -> item.second})
+}
+class NAND: AND() {
+    override var output = true
+    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
+        = !super.getValue(inputs)
+}
+
+class Constant(val value: Boolean): LogicNode {
+    override fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>) {
+        // no inputs.
+    }
+
+    override fun getOutputs(outputs: Iterable<LogicEdge>) {
         for (each in outputs) {
             each.queuedValue = value
         }
     }
 }
 
-open class OR: CombinatorialNode {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = inputs.any({item -> item.second})
-}
-class NOR: OR() {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = !super.getValue(inputs)
-}
-open class XOR: CombinatorialNode {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = inputs.fold(false, {a, b -> a xor b.second})
-}
-class XNOR: XOR() {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = !super.getValue(inputs)
-}
-open class AND: CombinatorialNode {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = inputs.all({item -> item.second})
-}
-class NAND: AND() {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = !super.getValue(inputs)
-}
-
-class Constant(val value: Boolean): CombinatorialNode {
-    override fun getValue(inputs: Iterable<Pair<LogicChannel, Boolean>>)
-        = value
-}
-
 class Output(val name: String): LogicNode {
     var state = false;
-    override fun tickLogic(inputs: Iterable<Pair<LogicChannel, Boolean>>, outputs: Iterable<LogicEdge>) {
+    override fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>) {
         val oldState = state
         state = inputs.any({value -> value.second})
         if (state != oldState) println("Output $name changed to $state!")
+    }
+    override fun getOutputs(outputs: Iterable<LogicEdge>) {
+        // no outputs
     }
 }
 
 class TransparentLatch: LogicNode {
     var state = false;
-    override fun tickLogic(inputs: Iterable<Pair<LogicChannel, Boolean>>, outputs: Iterable<LogicEdge>) {
+    override fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>) {
         val updateState = inputs.any({entry -> entry.first.tag == LogicTag.GateSpecific(0) && entry.second})
         if (updateState) {
             state = inputs.any({entry -> entry.first.tag == LogicTag.Default && entry.second})
         }
+    }
+    override fun getOutputs(outputs: Iterable<LogicEdge>) {
         for (each in outputs) {
             each.queuedValue = state
         }
@@ -75,8 +97,11 @@ data class NewEdge(val from: LogicNode, val to: LogicNode, val edge: LogicEdge)
 interface CollapsableNode: LogicNode {
     fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>)
 
-    override fun tickLogic(inputs: Iterable<Pair<LogicChannel, Boolean>>, outputs: Iterable<LogicEdge>)
+    override fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>)
         = TODO("ticking of collapsable objects not supported")
+
+    override fun getOutputs(outputs: Iterable<LogicEdge>)
+        = TODO("getting outputs of collapsable objects not supported")
 }
 
 class Wire: CollapsableNode {
