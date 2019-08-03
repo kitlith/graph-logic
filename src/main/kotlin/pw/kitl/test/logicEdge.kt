@@ -5,14 +5,24 @@ import java.util.Objects
 sealed class Channel {
     object Default: Channel()
     data class Bundled(val ch: Int): Channel()
+
+    override fun toString(): String = when (this) {
+        is Default -> "Channel::Default"
+        is Bundled -> "Channel::${this}"
+    }
 }
 
 sealed class LogicTag {
     object Default : LogicTag()
     data class GateSpecific(val tag: Int): LogicTag()
+
+    override fun toString(): String = when (this) {
+        is Default -> "Channel::Default"
+        is GateSpecific -> "Channel::${this}"
+    }
 }
 
-class LogicChannel(val ch: Channel = Channel.Default, val tag: LogicTag = LogicTag.Default)
+data class LogicChannel(val ch: Channel = Channel.Default, val tag: LogicTag = LogicTag.Default)
 
 class LogicEdge(val fromChannel: LogicChannel = LogicChannel(), val toChannel: LogicChannel = LogicChannel(), val fromUid: Int = currentUid++, val toUid: Int = currentUid++, value: Boolean = false, var queuedValue: Boolean = false) {
     var value: Boolean
@@ -36,6 +46,8 @@ class LogicEdge(val fromChannel: LogicChannel = LogicChannel(), val toChannel: L
     }
 
     override fun hashCode() = Objects.hash(fromUid, toUid)
+
+    /* override fun toString(): String = "LogicEdge(fromChannel=${fromChannel}, toChannel=${toChannel})" */
 
     fun tickEdge() {
         value = queuedValue

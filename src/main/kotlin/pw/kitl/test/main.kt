@@ -21,6 +21,12 @@ fun main(args : Array<String>) {
     val w3 = Wire()
     val bw1 = BundledWire()
     val bw2 = BundledWire()
+    val nullcell = NullCell()
+
+    /* graph.addEdge(t, w1, LogicEdge())
+    graph.addEdge(f, w1, LogicEdge())
+    graph.addEdge(w1, Output("1"), LogicEdge())
+    graph.addEdge(w1, Output("2"), LogicEdge()) */
 
     // nodes are being implicitly added to the graph.
     graph.addEdge(t, xor1, LogicEdge());
@@ -29,8 +35,12 @@ fun main(args : Array<String>) {
     graph.addEdge(f, xor2, LogicEdge());
     graph.addEdge(xor1, bw1, LogicEdge(toChannel=LogicChannel(ch=Channel.Bundled(0))));
     graph.addEdge(xor2, bw1, LogicEdge(toChannel=LogicChannel(ch=Channel.Bundled(1))));
-    graph.addEdge(bw1, bw2, LogicEdge());
-    graph.addEdge(bw2, bw1, LogicEdge());
+    graph.addEdge(bw1, nullcell, LogicEdge());
+    graph.addEdge(nullcell, bw1, LogicEdge());
+    graph.addEdge(nullcell, bw2, LogicEdge());
+    graph.addEdge(bw2, nullcell, LogicEdge());
+    graph.addEdge(Constant(true), nullcell, LogicEdge(toChannel=LogicChannel(tag=LogicTag.GateSpecific(0))))
+    graph.addEdge(nullcell, Output("null_test"), LogicEdge(fromChannel=LogicChannel(tag=LogicTag.GateSpecific(0))))
     graph.addEdge(bw2, xor3, LogicEdge(fromChannel=LogicChannel(ch=Channel.Bundled(0))));
     graph.addEdge(bw2, xor3, LogicEdge(fromChannel=LogicChannel(ch=Channel.Bundled(1))));
     graph.addEdge(xor3, w1, LogicEdge());
@@ -43,11 +53,15 @@ fun main(args : Array<String>) {
 
     val pulseXOR = XOR()
     val pulseOR = OR()
-    val latch = TransparentLatch()
+    val latch = LatchCell()
+    val latchWire = Wire()
     graph.addEdge(t, pulseXOR, LogicEdge())
     graph.addEdge(t, pulseOR, LogicEdge())
     graph.addEdge(pulseOR, pulseXOR, LogicEdge())
     graph.addEdge(pulseXOR, latch, LogicEdge(toChannel=LogicChannel(tag=LogicTag.GateSpecific(0))))
+    graph.addEdge(latch, latchWire, LogicEdge(fromChannel=LogicChannel(tag=LogicTag.GateSpecific(0))))
+    graph.addEdge(latchWire, latch, LogicEdge(toChannel=LogicChannel(tag=LogicTag.GateSpecific(0))))
+    graph.addEdge(latchWire, Output("latch_en"), LogicEdge())
     graph.addEdge(t, latch, LogicEdge())
     graph.addEdge(latch, Output("latch"), LogicEdge())
 
@@ -56,13 +70,14 @@ fun main(args : Array<String>) {
     var collapsed_graph = create_logicgraph();
     collapsed_graph.merge(graph);
     collapse_wires(collapsed_graph)
+    export_graph(collapsed_graph, "middle.dot")
     var iterations = 0
     var nodes_to_tick: Set<LogicNode> = setOf(t,f);
     while (nodes_to_tick.size != 0) {
         nodes_to_tick = tick_graph(collapsed_graph, nodes_to_tick)
         iterations += 1
     }
-    export_graph(collapsed_graph, "middle.dot")
+    export_graph(collapsed_graph, "logic.dot")
     println("Took $iterations iterations")
 
     iterations = 0;
@@ -97,15 +112,15 @@ fun export_graph(graph: MutableNetwork<LogicNode, LogicEdge>, filename: String) 
     }
     val edgeNameProvider = object: ComponentNameProvider<LogicEdge> {
         override fun getName(edge: LogicEdge): String =
-            /* if (edge.fromChannel != LogicChannel.DEFAULT) {
-                "${edge.fromChannel.name}:"
+             if (edge.fromChannel.tag != LogicTag.Default) {
+                "${edge.fromChannel.tag}:"
             } else {
                 ""
-            } + */ "${edge.value}" /* + if (edge.toChannel != LogicChannel.DEFAULT) {
-                ":${edge.toChannel.name}"
+            } +  "${edge.value}" + if (edge.toChannel.tag != LogicTag.Default) {
+                ":${edge.toChannel.tag}"
             } else {
                 ""
-            } */
+            }
 
     }
     val edgeAttributeProvider = object: ComponentAttributeProvider<LogicEdge> {

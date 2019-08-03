@@ -4,6 +4,8 @@ import com.google.common.graph.MutableNetwork
 import kotlin.reflect.KClass
 import kotlin.reflect.full.createInstance
 
+
+
 interface LogicNode {
     fun updateState(inputs: Iterable<Pair<LogicChannel, Boolean>>)
     fun getOutputs(outputs: Iterable<LogicEdge>)
@@ -104,166 +106,143 @@ interface CollapsableNode: LogicNode {
         = TODO("getting outputs of collapsable objects not supported")
 }
 
-class Wire: CollapsableNode {
+open class Wire: CollapsableNode {
+    // performs (the equiv of) a bipartite graph projection on the subgraph of this node and its neighbors
     override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        val newEdges: List<NewEdge> = graph.inEdges(this).flatMap({inEdge ->
-            val inNode = graph.incidentNodes(inEdge).source()
-            val isCollapsable = inNode is CollapsableNode
-            graph.outEdges(this)
-                .filter({outEdge -> !isCollapsable || inNode != graph.incidentNodes(outEdge).target()})
-                .map({outEdge ->
-                    NewEdge(inNode, graph.incidentNodes(outEdge).target(), LogicEdge(inEdge.fromChannel, outEdge.toChannel, inEdge.fromUid, outEdge.toUid))
-                })
-        })
-
-        for (newEdge in newEdges) {
-            graph.addEdge(newEdge.from, newEdge.to, newEdge.edge)
-        }
-        graph.removeNode(this)
-    }
-}
-
-class BundledWire: CollapsableNode {
-    override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        val newEdges: List<NewEdge> = if (graph.adjacentNodes(this).filterIsInstance<BundledWire>().any()) {
-            // First, we need to merge the BundledWires to gather all the edges together.
-            graph.outEdges(this)
-                .flatMap({outEdge ->
-                    val outNode = graph.incidentNodes(outEdge).target()
-                    val outIsBundled = outNode is BundledWire
-                    graph.inEdges(this)
-                        .filter({inEdge ->
-                            val inNode = graph.incidentNodes(inEdge).source()
-                            outNode != inNode && (outIsBundled || inNode is BundledWire)
-                        }).map({inEdge ->
-                            val inNode = graph.incidentNodes(inEdge).source()
-                            val inIsBundled = inNode is BundledWire
-                            if (outIsBundled && inIsBundled) {
-                                NewEdge(inNode, outNode, LogicEdge(inEdge.fromChannel, outEdge.toChannel, inEdge.fromUid, outEdge.toUid))
-                            } else if (inIsBundled) {
-                                NewEdge(inNode, outNode, outEdge)
-                            } else { // outIsBundled
-                                NewEdge(inNode, outNode, inEdge)
-                            }
-                        })
-                })
-        } else {
-            // since all edges are gathered, merge edges by comparing from.toUid and to.fromUid
-            graph.inEdges(this).flatMap({inEdge ->
-                val inNode = graph.incidentNodes(inEdge).source()
-                graph.outEdges(this)
-                    .filter({outEdge ->
-                        inEdge.toChannel.ch is Channel.Bundled &&
-                        outEdge.fromChannel.ch is Channel.Bundled &&
+        val newEdges: List<NewEdge> = graph.outEdges(this)
+            .flatMap({outEdge ->
+                graph.inEdges(this)
+                    .filter({inEdge ->
+                        !(inEdge.toChannel.ch is Channel.Bundled && outEdge.fromChannel.ch is Channel.Bundled) ||
                         inEdge.toChannel.ch == outEdge.fromChannel.ch
-                    })
-                    .map({outEdge ->
-                        NewEdge(inNode, graph.incidentNodes(outEdge).target(), LogicEdge(inEdge.fromChannel, outEdge.toChannel, inEdge.fromUid, outEdge.toUid))
+                    }).map({inEdge ->
+                        NewEdge(
+                            graph.incidentNodes(inEdge).source(),
+                            graph.incidentNodes(outEdge).target(),
+                            when {
+                                inEdge.toChannel.ch == outEdge.fromChannel.ch -> LogicEdge(
+                                    inEdge.fromChannel,
+                                    outEdge.toChannel,
+                                    inEdge.fromUid,
+                                    outEdge.toUid
+                                )
+                                inEdge.toChannel.ch is Channel.Bundled -> inEdge
+                                outEdge.fromChannel.ch is Channel.Bundled -> outEdge
+                                else -> TODO("Shouldn't happen!")
+                            }
+                        )
                     })
             })
-        }
+
         graph.removeNode(this)
         for (newEdge in newEdges) {
             graph.addEdge(newEdge.from, newEdge.to, newEdge.edge)
         }
+        graph.removeNode(this) // double remove for workaround for self-loop
     }
 }
+
+// seperate class for rendering purposes, completely identical to Wire.
+class BundledWire: Wire()
 
 interface TilableLogic: CollapsableNode {
-    val newNode: LogicNode
-    override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        val tmpEdge = LogicEdge()
-        val newEdges: List<NewEdge> = graph.inEdges(this).flatMap({inEdge ->
-            val inNode = graph.incidentNodes(inEdge).source()
-            var new = graph.outEdges(this)
-                .filter({outEdge ->
-                    inEdge.toChannel.ch == outEdge.fromChannel.ch
-                })
-                .map({outEdge ->
-                    NewEdge(inNode, graph.incidentNodes(outEdge).target(), LogicEdge(inEdge, outEdge))
-                })
-            if (inEdge.toChannel.tag is LogicTag.Default) {
-                new += NewEdge(inNode, newNode, LogicEdge(fromChannel=inEdge.fromChannel, fromUid=inEdge.fromUid, toUid=tmpEdge.toUid))
+    val extraNode: LogicNode
+    val mainNode: LogicNode
+
+    fun additional_considerations(graph: LogicNetwork)
+
+    override fun collapse(graph: LogicNetwork) {
+        val newEdges = graph.inEdges(this)
+        .filter({edge ->
+            val incident = graph.incidentNodes(edge)
+            incident.source() != incident.target()
+        })
+        .map({edge ->
+            val src = graph.incidentNodes(edge).source()
+            when (edge.toChannel.tag) {
+                is LogicTag.Default -> NewEdge(src, mainNode, edge)
+                is LogicTag.GateSpecific -> NewEdge(src, extraNode, edge)
             }
-            new
-        }) + graph.outEdges(this)
-            .filter({outEdge -> outEdge.fromChannel.tag is LogicTag.GateSpecific})
-            .map({outEdge ->
-                NewEdge(newNode, graph.incidentNodes(outEdge).target(), LogicEdge(toChannel=outEdge.toChannel, fromUid=tmpEdge.fromUid, toUid=outEdge.toUid))
-            })
+        }) +
+        graph.outEdges(this)
+        .filter({edge ->
+            val incident = graph.incidentNodes(edge)
+            incident.source() != incident.target()
+        })
+        .map({edge ->
+            val target = graph.incidentNodes(edge).target()
+            when (edge.fromChannel.tag) {
+                is LogicTag.Default -> NewEdge(mainNode, target, edge)
+                is LogicTag.GateSpecific -> NewEdge(extraNode, target, edge)
+            }
+        });
 
         graph.removeNode(this)
+        graph.addNode(extraNode)
+        graph.addNode(mainNode)
         for (newEdge in newEdges) {
             graph.addEdge(newEdge.from, newEdge.to, newEdge.edge)
         }
+
+        this.additional_considerations(graph)
+
+        (extraNode as? CollapsableNode)?.collapse(graph)
+        (mainNode as? CollapsableNode)?.collapse(graph)
     }
 }
 
-class DummyLogic: CollapsableNode {
-    override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        graph.removeNode(this)
+interface BiTilable: TilableLogic {
+    override val extraNode: Wire
+    override val mainNode: Wire
+
+    val newNode: LogicNode
+
+    override fun additional_considerations(graph: LogicNetwork) {
+        graph.addEdge(mainNode, newNode, LogicEdge())
+        graph.addEdge(newNode, extraNode, LogicEdge())
+
+        (newNode as? CollapsableNode)?.collapse(graph)
+    }
+}
+
+interface UniTilable: TilableLogic {
+    override val extraNode: Wire
+
+    override fun additional_considerations(graph: LogicNetwork) {
+        graph.addEdge(extraNode, mainNode, LogicEdge())
     }
 }
 
 class NullCell: TilableLogic {
-    override val newNode = DummyLogic()
+    override val extraNode = Wire()
+    override val mainNode = Wire()
+
+    override fun additional_considerations(graph: LogicNetwork) {}
 }
 
-class BufferCell: TilableLogic {
+class BufferCell: BiTilable {
+    override val extraNode = Wire()
+    override val mainNode = Wire()
     override val newNode = OR()
 }
 
-class InvertCell: TilableLogic {
+class InvertCell: BiTilable {
+    override val extraNode = Wire()
+    override val mainNode = Wire()
     override val newNode = NOR()
 }
 
-/* class AndCell: TilableLogic {
-    override val newNode = AND() // unfortunately, this has different semantics.
-} */
-
-/* class NullCell: CollapsableNode {
-    override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        val newEdges: List<NewEdge> = graph.inEdges(this).flatMap({inEdge ->
-            graph.inEdges(this).flatMap({inEdge ->
-                val inNode = graph.incidentNodes(inEdge).source()
-                graph.outEdges(this)
-                    .filter({outEdge ->
-                        inEdge.toChannel.ch == outEdge.fromChannel.ch
-                    })
-                    .map({outEdge ->
-                        NewEdge(inNode, graph.incidentNodes(outEdge).target(), LogicEdge(inEdge.fromChannel, outEdge.toChannel, inEdge.fromUid, outEdge.toUid))
-                    })
-            })
-        })
-
-        for (newEdge in newEdges) {
-            graph.addEdge(newEdge.from, newEdge.to, newEdge.edge)
-        }
-        graph.removeNode(this)
-    }
+class AndCell: UniTilable {
+    override val extraNode = Wire()
+    override val mainNode = AND()
 }
 
-class InvertCell: CollapsableNode {
-    override fun collapse(graph: MutableNetwork<LogicNode, LogicEdge>) {
-        val newNode = NOR()
-        val newEdges: List<NewEdge> = graph.inEdges(this).flatMap({inEdge ->
-            graph.inEdges(this).flatMap({inEdge ->
-                val inNode = graph.incidentNodes(inEdge).source()
-                var new = graph.outEdges(this)
-                    .filter({outEdge ->
-                        inEdge.toChannel.ch == outEdge.fromChannel.ch
-                    })
-                    .map({outEdge ->
-                        NewEdge(inNode, graph.incidentNodes(outEdge).target(), LogicEdge(inEdge, outEdge))
-                    })
-                if (inEdge.toChannel.tag is LogicTag.Default) {
-                    new += NewEdge(inNode, newNode, LogicEdge(fromChannel=inEdge.fromChannel, fromUid=inEdge.fromUid))
-                }
-            }) + graph.outEdges(this)
-                .filter({outEdge -> outEdge.fromChannel is LogicTag.GateSpecific})
-                .map({outEdge ->
-                    NewEdge(newNode, graph.incidentNodes(outEdge).target(), LogicEdge(toChannel=outEdge.toChannel, toUid=outEdge.toUid))
-                })
-        })
-    }
-} */
+class XorCell: UniTilable {
+    override val extraNode = Wire()
+    override val mainNode = XOR()
+}
+
+class LatchCell: UniTilable {
+    override val extraNode = Wire()
+    override val mainNode = TransparentLatch()
+}

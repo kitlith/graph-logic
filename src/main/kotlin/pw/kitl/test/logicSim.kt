@@ -11,6 +11,8 @@ fun <N,E> MutableNetwork<N,E>.merge(other: Network<N,E>) {
     }
 }
 
+typealias LogicNetwork = MutableNetwork<LogicNode, LogicEdge>
+
 fun create_logicgraph(): MutableNetwork<LogicNode, LogicEdge>
     = NetworkBuilder.directed()
         .allowsParallelEdges(true)
@@ -18,10 +20,13 @@ fun create_logicgraph(): MutableNetwork<LogicNode, LogicEdge>
         .build()
 
 fun collapse_wires(graph: MutableNetwork<LogicNode, LogicEdge>) {
+    //var cnt = 0;
     for (node in graph.nodes().filterIsInstance<CollapsableNode>()) {
         node.collapse(graph)
+        //cnt += 1;
+        //export_graph(graph, "collapsing/${cnt}.dot")
     }
-
+    //export_graph(graph, "tmp.dot")
     for (node in graph.nodes()) {
         node.getOutputs(graph.outEdges(node))
     }
